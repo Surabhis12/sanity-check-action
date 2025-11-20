@@ -6,7 +6,7 @@ Reusable GitHub Action for automated code quality and vulnerability checks.
 
 In your repository, create `.github/workflows/sanity-check.yml`:
 ```yaml
-name: Code Quality Check
+name: Sanity Check
 
 on:
   pull_request:
@@ -23,11 +23,11 @@ jobs:
     
     steps:
       - name: Checkout PR code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       
-      - name: Run Sanity Check
+      - name: Run Sanity check
         uses: Surabhis12/sanity-check-action@v1
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
