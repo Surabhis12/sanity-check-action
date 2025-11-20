@@ -172,7 +172,7 @@ runs:
         # Run C/C++ checks
         if [ "${{ steps.detect.outputs.has_cpp }}" = "true" ]; then
           echo ">>> Running C/C++ checks..."
-          if bash "$ACTION_PATH/scripts/cpp-check.sh"; then
+          if bash "$ACTION_PATH/scripts/cpp-check.sh" 2>&1 | tee check_results.txt; then
             echo "✅ C/C++ checks passed"
           else
             echo "❌ C/C++ checks failed"
@@ -184,7 +184,7 @@ runs:
         # Run JavaScript checks
         if [ "${{ steps.detect.outputs.has_js }}" = "true" ]; then
           echo ">>> Running JavaScript checks..."
-          if bash "$ACTION_PATH/scripts/js-check.sh"; then
+          if bash "$ACTION_PATH/scripts/js-check.sh" 2>&1 | tee -a check_results.txt; then
             echo "✅ JavaScript checks passed"
           else
             echo "❌ JavaScript checks failed"
@@ -196,7 +196,7 @@ runs:
         # Run Rust checks
         if [ "${{ steps.detect.outputs.has_rust }}" = "true" ]; then
           echo ">>> Running Rust checks..."
-          if bash "$ACTION_PATH/scripts/rust-check.sh"; then
+          if bash "$ACTION_PATH/scripts/rust-check.sh" 2>&1 | tee -a check_results.txt; then
             echo "✅ Rust checks passed"
           else
             echo "❌ Rust checks failed"
@@ -208,7 +208,7 @@ runs:
         # Run Kotlin checks
         if [ "${{ steps.detect.outputs.has_kotlin }}" = "true" ]; then
           echo ">>> Running Kotlin checks..."
-          if bash "$ACTION_PATH/scripts/kotlin-check.sh"; then
+          if bash "$ACTION_PATH/scripts/kotlin-check.sh" 2>&1 | tee -a check_results.txt; then
             echo "✅ Kotlin checks passed"
           else
             echo "❌ Kotlin checks failed"
@@ -220,7 +220,7 @@ runs:
         # Run Swift checks
         if [ "${{ steps.detect.outputs.has_swift }}" = "true" ]; then
           echo ">>> Running Swift checks..."
-          if bash "$ACTION_PATH/scripts/swift-check.sh"; then
+          if bash "$ACTION_PATH/scripts/swift-check.sh" 2>&1 | tee -a check_results.txt; then
             echo "✅ Swift checks passed"
           else
             echo "❌ Swift checks failed"
@@ -232,7 +232,7 @@ runs:
         # Run Java checks
         if [ "${{ steps.detect.outputs.has_java }}" = "true" ]; then
           echo ">>> Running Java checks..."
-          if bash "$ACTION_PATH/scripts/java-check.sh"; then
+          if bash "$ACTION_PATH/scripts/java-check.sh" 2>&1 | tee -a check_results.txt; then
             echo "✅ Java checks passed"
           else
             echo "❌ Java checks failed"
@@ -244,7 +244,7 @@ runs:
         # Run Flutter checks
         if [ "${{ steps.detect.outputs.has_flutter }}" = "true" ]; then
           echo ">>> Running Flutter checks..."
-          if bash "$ACTION_PATH/scripts/flutter-check.sh"; then
+          if bash "$ACTION_PATH/scripts/flutter-check.sh" 2>&1 | tee -a check_results.txt; then
             echo "✅ Flutter checks passed"
           else
             echo "❌ Flutter checks failed"
@@ -271,20 +271,111 @@ runs:
       with:
         github-token: ${{ inputs.github-token }}
         script: |
+          const fs = require('fs');
           const status = '${{ steps.run-checks.outputs.status }}';
           const statusEmoji = status === 'success' ? '✅' : '❌';
           const statusText = status === 'success' ? 'PASSED' : 'FAILED';
           
+          // Read check results
+          let results = '';
+          try {
+            results = fs.readFileSync('check_results.txt', 'utf8');
+          } catch (error) {
+            results = 'Could not read check results';
+          }
+          
+          let errorSummary = '';
+          
+          if (status === 'failure') {
+            const lines = results.split('\n');
+            errorSummary = '\n## 🚨 Key Issues Found:\n\n';
+            
+            let currentLanguage = '';
+            let languageErrors = {};
+            
+            // Parse errors by language
+            for (let i = 0; i < lines.length; i++) {
+              const line = lines[i];
+              
+              // Detect language sections
+              if (line.includes('C/C++ SANITY CHECK')) {
+                currentLanguage = 'C/C++';
+                languageErrors[currentLanguage] = [];
+              } else if (line.includes('RUST SANITY CHECK')) {
+                currentLanguage = 'Rust';
+                languageErrors[currentLanguage] = [];
+              } else if (line.includes('JAVASCRIPT SANITY CHECK')) {
+                currentLanguage = 'JavaScript';
+                languageErrors[currentLanguage] = [];
+              } else if (line.includes('KOTLIN SANITY CHECK')) {
+                currentLanguage = 'Kotlin';
+                languageErrors[currentLanguage] = [];
+              } else if (line.includes('JAVA SANITY CHECK')) {
+                currentLanguage = 'Java';
+                languageErrors[currentLanguage] = [];
+              } else if (line.includes('SWIFT SANITY CHECK')) {
+                currentLanguage = 'Swift';
+                languageErrors[currentLanguage] = [];
+              } else if (line.includes('FLUTTER/DART SANITY CHECK')) {
+                currentLanguage = 'Dart/Flutter';
+                languageErrors[currentLanguage] = [];
+              }
+              
+              // Capture error lines (format: file:line: error/warning: message)
+              if (currentLanguage && line.match(/.*:\d+:.*(?:error|warning):/)) {
+                languageErrors[currentLanguage].push(line.trim());
+              }
+            }
+            
+            // Build error summary
+            let totalErrors = 0;
+            for (const [lang, errors] of Object.entries(languageErrors)) {
+              if (errors.length > 0) {
+                totalErrors += errors.length;
+                errorSummary += `### ${lang}\n`;
+                errors.forEach(error => {
+                  errorSummary += `${error}\n`;
+                });
+                errorSummary += '\n';
+              }
+            }
+            
+            if (totalErrors > 0) {
+              errorSummary += `**Total issues found: ${totalErrors}**\n\n`;
+            }
+            
+            errorSummary += '---\n';
+          }
+          
+          // Get checked languages
+          const languagesList = [];
+          if ('${{ steps.detect.outputs.has_cpp }}' === 'true') languagesList.push('C/C++');
+          if ('${{ steps.detect.outputs.has_js }}' === 'true') languagesList.push('JavaScript/TypeScript');
+          if ('${{ steps.detect.outputs.has_rust }}' === 'true') languagesList.push('Rust');
+          if ('${{ steps.detect.outputs.has_kotlin }}' === 'true') languagesList.push('Kotlin');
+          if ('${{ steps.detect.outputs.has_swift }}' === 'true') languagesList.push('Swift');
+          if ('${{ steps.detect.outputs.has_java }}' === 'true') languagesList.push('Java');
+          if ('${{ steps.detect.outputs.has_flutter }}' === 'true') languagesList.push('Dart/Flutter');
+          
           const body = `## ${statusEmoji} Sanity Check ${statusText}
           
-          ${status === 'failure' ? '⚠️ **Action Required:** Please fix the issues above before merging.\n' : ''}
+          ${status === 'failure' ? '⚠️ **Action Required:** Please fix the issues below before merging.\n' : '✅ **All checks passed!** Your code meets quality standards.\n'}
           
-          **Languages Checked:**
-          ${('${{ steps.detect.outputs.has_cpp }}' === 'true' ? '- C/C++\n' : '')}${('${{ steps.detect.outputs.has_js }}' === 'true' ? '- JavaScript/TypeScript\n' : '')}${('${{ steps.detect.outputs.has_rust }}' === 'true' ? '- Rust\n' : '')}${('${{ steps.detect.outputs.has_kotlin }}' === 'true' ? '- Kotlin\n' : '')}${('${{ steps.detect.outputs.has_swift }}' === 'true' ? '- Swift\n' : '')}${('${{ steps.detect.outputs.has_java }}' === 'true' ? '- Java\n' : '')}${('${{ steps.detect.outputs.has_flutter }}' === 'true' ? '- Dart/Flutter\n' : '')}
+          **Languages Checked:** ${languagesList.join(', ') || 'None'}
+          
+          ${errorSummary}
+          
+          <details>
+          <summary>📋 Click to view full detailed results (with code context)</summary>
+          
+          \`\`\`
+          ${results}
+          \`\`\`
+          
+          </details>
           
           ---
-          ${status === 'failure' ? '**Next Steps:** Fix the reported issues, commit your changes, and the checks will re-run automatically.\n\n' : ''}
-          *Automated sanity checks completed at ${new Date().toISOString()}*`;
+          ${status === 'failure' ? '**Next Steps:** Fix the reported issues, commit your changes, and the checks will re-run automatically.\n\n' : ''}*Automated sanity checks completed at ${new Date().toISOString()}*`;
           
           await github.rest.issues.createComment({
             issue_number: context.issue.number,
@@ -303,6 +394,11 @@ runs:
           const label = status === 'success' ? 'sanity-check-passed' : 'sanity-check-failed';
           const oppositeLabel = status === 'success' ? 'sanity-check-failed' : 'sanity-check-passed';
           
+          console.log(`Status: ${status}`);
+          console.log(`Adding label: ${label}`);
+          console.log(`Removing label: ${oppositeLabel}`);
+          
+          // Remove opposite label if it exists
           try {
             await github.rest.issues.removeLabel({
               issue_number: context.issue.number,
@@ -310,16 +406,45 @@ runs:
               repo: context.repo.repo,
               name: oppositeLabel
             });
+            console.log(`✅ Removed ${oppositeLabel}`);
           } catch (error) {
-            // Label doesn't exist
+            console.log(`Label ${oppositeLabel} doesn't exist, skipping removal`);
           }
           
-          await github.rest.issues.addLabels({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            labels: [label]
-          });
+          // Add the current label
+          try {
+            await github.rest.issues.addLabels({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: [label]
+            });
+            console.log(`✅ Added ${label}`);
+          } catch (error) {
+            console.error(`Failed to add label: ${error.message}`);
+            // Try to create the label first if it doesn't exist
+            try {
+              const color = status === 'success' ? '0e8a16' : 'd73a4a';
+              await github.rest.issues.createLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: label,
+                color: color,
+                description: `Sanity check ${status === 'success' ? 'passed' : 'failed'}`
+              });
+              console.log(`✅ Created label ${label}`);
+              // Try adding again after creation
+              await github.rest.issues.addLabels({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                labels: [label]
+              });
+              console.log(`✅ Added ${label} after creation`);
+            } catch (createError) {
+              console.error(`Failed to create/add label: ${createError.message}`);
+            }
+          }
     
     - name: Fail workflow if checks failed
       if: steps.run-checks.outputs.status == 'failure'
