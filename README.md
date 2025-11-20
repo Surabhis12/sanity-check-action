@@ -1,4 +1,3 @@
-cat > README.md << 'EOF'
 # Multi-Language Sanity Check Action
 
 Reusable GitHub Action for automated code quality and vulnerability checks.
