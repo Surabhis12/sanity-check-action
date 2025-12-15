@@ -312,7 +312,6 @@ runs:
           
           console.log('Final Status:', finalStatus);
           
-          // Get checked languages
           const languagesList = [];
           if ('${{ steps.detect.outputs.has_cpp }}' === 'true') languagesList.push('C/C++');
           if ('${{ steps.detect.outputs.has_js }}' === 'true') languagesList.push('JavaScript/TypeScript');
@@ -325,7 +324,6 @@ runs:
           let body = '';
           
           if (finalStatus === 'skipped') {
-            // Skipped status - no code files changed
             body = `## ⏭️ Sanity Checks Skipped
           
 **No supported code files were changed in this PR.**
@@ -339,7 +337,6 @@ This PR only contains changes to documentation, configuration, or other non-code
 
 *Status checked at ${new Date().toISOString()}*`;
           } else if (finalStatus === 'success') {
-            // Success status
             body = `## ✅ Sanity Check PASSED
 
 **All checks passed!** Your code meets quality standards.
@@ -349,7 +346,6 @@ This PR only contains changes to documentation, configuration, or other non-code
 ---
 *Automated sanity checks completed at ${new Date().toISOString()}*`;
           } else {
-            // Failure status
             let results = '';
             try {
               results = fs.readFileSync('check_results.txt', 'utf8');
@@ -363,11 +359,9 @@ This PR only contains changes to documentation, configuration, or other non-code
             let currentLanguage = '';
             let languageErrors = {};
             
-            // Parse errors by language
             for (let i = 0; i < lines.length; i++) {
               const line = lines[i];
               
-              // Detect language sections
               if (line.includes('C/C++ SANITY CHECK')) {
                 currentLanguage = 'C/C++';
                 languageErrors[currentLanguage] = [];
@@ -391,13 +385,11 @@ This PR only contains changes to documentation, configuration, or other non-code
                 languageErrors[currentLanguage] = [];
               }
               
-              // Capture error lines
               if (currentLanguage && line.match(/.*:\d+:.*(?:error|warning):/)) {
                 languageErrors[currentLanguage].push(line.trim());
               }
             }
             
-            // Build error summary
             let totalErrors = 0;
             for (const [lang, errors] of Object.entries(languageErrors)) {
               if (errors.length > 0) {
@@ -459,7 +451,6 @@ ${results}
         script: |
           const finalStatus = '${{ steps.set-final-status.outputs.status }}';
           
-          // Skipped counts as success for labeling
           const label = (finalStatus === 'success' || finalStatus === 'skipped') ? 'sanity-check-passed' : 'sanity-check-failed';
           const oppositeLabel = (finalStatus === 'success' || finalStatus === 'skipped') ? 'sanity-check-failed' : 'sanity-check-passed';
           
@@ -467,7 +458,6 @@ ${results}
           console.log(`Adding label: ${label}`);
           console.log(`Removing label: ${oppositeLabel}`);
           
-          // Remove opposite label if it exists
           try {
             await github.rest.issues.removeLabel({
               issue_number: context.issue.number,
@@ -480,7 +470,6 @@ ${results}
             console.log(`Label ${oppositeLabel} doesn't exist, skipping removal`);
           }
           
-          // Add the current label
           try {
             await github.rest.issues.addLabels({
               issue_number: context.issue.number,
@@ -491,7 +480,6 @@ ${results}
             console.log(`✅ Added ${label}`);
           } catch (error) {
             console.error(`Failed to add label: ${error.message}`);
-            // Try to create the label first if it doesn't exist
             try {
               const color = label === 'sanity-check-passed' ? '0e8a16' : 'd73a4a';
               await github.rest.issues.createLabel({
@@ -502,7 +490,6 @@ ${results}
                 description: `Sanity check ${label === 'sanity-check-passed' ? 'passed' : 'failed'}`
               });
               console.log(`✅ Created label ${label}`);
-              // Try adding again after creation
               await github.rest.issues.addLabels({
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
