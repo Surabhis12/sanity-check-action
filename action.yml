@@ -347,24 +347,24 @@ runs:
       id: dependency-scan
       continue-on-error: true
       shell: bash
-      timeout-minutes: ${{ fromJSON(inputs.check-timeout) }}
       run: |
         echo "=== Dependency Vulnerability Scanning ==="
         SCAN_FAILED=false
+        TIMEOUT_SECONDS=$((60 * ${{ inputs.check-timeout }}))
         
-        # npm audit
+        # npm audit with timeout
         if [ -f "package-lock.json" ] && [ "${{ steps.detect.outputs.has_js }}" = "true" ]; then
           echo "Running npm audit..."
-          if ! npm audit --audit-level=moderate 2>&1 | tee npm_audit.txt; then
+          if ! timeout ${TIMEOUT_SECONDS} npm audit --audit-level=moderate 2>&1 | tee npm_audit.txt; then
             SCAN_FAILED=true
           fi
         fi
         
-        # cargo audit (if Cargo.lock exists)
+        # cargo audit with timeout
         if [ -f "Cargo.lock" ] && [ "${{ steps.detect.outputs.has_rust }}" = "true" ]; then
           echo "Running cargo audit..."
           cargo install cargo-audit --quiet
-          if ! cargo audit 2>&1 | tee cargo_audit.txt; then
+          if ! timeout ${TIMEOUT_SECONDS} cargo audit 2>&1 | tee cargo_audit.txt; then
             SCAN_FAILED=true
           fi
         fi
@@ -380,7 +380,6 @@ runs:
       id: run-checks
       continue-on-error: true
       shell: bash
-      timeout-minutes: ${{ fromJSON(inputs.check-timeout) }}
       run: |
         echo "================================"
         echo "   RUNNING SANITY CHECKS"
@@ -390,9 +389,10 @@ runs:
         OVERALL_STATUS=0
         ACTION_PATH="${{ github.action_path }}"
         RESULTS_JSON="{"
+        TIMEOUT_SECONDS=$((60 * ${{ inputs.check-timeout }}))
         
-        # Function to run checks in parallel
-        run_check_parallel() {
+        # Function to run checks with timeout
+        run_check_with_timeout() {
           local lang=$1
           local script=$2
           local enabled=$3
@@ -400,11 +400,16 @@ runs:
           if [ "$enabled" = "true" ]; then
             echo ">>> Running $lang checks..."
             (
-              if bash "$ACTION_PATH/scripts/$script" 2>&1 | tee "${lang}_check.txt"; then
+              if timeout ${TIMEOUT_SECONDS} bash "$ACTION_PATH/scripts/$script" 2>&1 | tee "${lang}_check.txt"; then
                 echo "✅ $lang checks passed"
                 exit 0
               else
-                echo "❌ $lang checks failed"
+                exit_code=$?
+                if [ $exit_code -eq 124 ]; then
+                  echo "⏱️  $lang checks timed out after ${{ inputs.check-timeout }} minutes"
+                else
+                  echo "❌ $lang checks failed"
+                fi
                 exit 1
               fi
             ) &
@@ -415,25 +420,25 @@ runs:
         declare -a pids=()
         
         [ "${{ steps.detect.outputs.has_cpp }}" = "true" ] && [ "${{ inputs.enable-cpp-check }}" = "true" ] && \
-          run_check_parallel "cpp" "cpp-check.sh" "true" && pids+=($!)
+          run_check_with_timeout "cpp" "cpp-check.sh" "true" && pids+=($!)
         
         [ "${{ steps.detect.outputs.has_js }}" = "true" ] && [ "${{ inputs.enable-js-check }}" = "true" ] && \
-          run_check_parallel "js" "js-check.sh" "true" && pids+=($!)
+          run_check_with_timeout "js" "js-check.sh" "true" && pids+=($!)
         
         [ "${{ steps.detect.outputs.has_rust }}" = "true" ] && [ "${{ inputs.enable-rust-check }}" = "true" ] && \
-          run_check_parallel "rust" "rust-check.sh" "true" && pids+=($!)
+          run_check_with_timeout "rust" "rust-check.sh" "true" && pids+=($!)
         
         [ "${{ steps.detect.outputs.has_kotlin }}" = "true" ] && [ "${{ inputs.enable-kotlin-check }}" = "true" ] && \
-          run_check_parallel "kotlin" "kotlin-check.sh" "true" && pids+=($!)
+          run_check_with_timeout "kotlin" "kotlin-check.sh" "true" && pids+=($!)
         
         [ "${{ steps.detect.outputs.has_swift }}" = "true" ] && [ "${{ inputs.enable-swift-check }}" = "true" ] && \
-          run_check_parallel "swift" "swift-check.sh" "true" && pids+=($!)
+          run_check_with_timeout "swift" "swift-check.sh" "true" && pids+=($!)
         
         [ "${{ steps.detect.outputs.has_java }}" = "true" ] && [ "${{ inputs.enable-java-check }}" = "true" ] && \
-          run_check_parallel "java" "java-check.sh" "true" && pids+=($!)
+          run_check_with_timeout "java" "java-check.sh" "true" && pids+=($!)
         
         [ "${{ steps.detect.outputs.has_flutter }}" = "true" ] && [ "${{ inputs.enable-flutter-check }}" = "true" ] && \
-          run_check_parallel "flutter" "flutter-check.sh" "true" && pids+=($!)
+          run_check_with_timeout "flutter" "flutter-check.sh" "true" && pids+=($!)
         
         # Wait for all checks to complete
         for pid in "${pids[@]}"; do
