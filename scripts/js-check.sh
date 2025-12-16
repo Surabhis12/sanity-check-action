@@ -8,6 +8,7 @@ if [ ! -f js_files.txt ]; then
     exit 0
 fi
 
+
 FILES=$(cat js_files.txt | tr '\n' ' ')
 
 echo "===================================="
