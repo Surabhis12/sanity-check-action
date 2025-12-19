@@ -19,12 +19,9 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    # ------------------------------------------------------------
-    # Detect changed files
-    # ------------------------------------------------------------
     - name: Get changed files
       id: changed-files
-      uses: tj-actions/changed-files@b3f7d4d8f7cbdac2f70fdd7fa34e2ad5cdbec2b4
+      uses: tj-actions/changed-files@v45
       with:
         files: |
           **/*.c
@@ -40,18 +37,21 @@ runs:
           **/*.swift
           **/*.java
           **/*.dart
-
-    # ------------------------------------------------------------
-    # Language detection (RESTORED – critical)
-    # ------------------------------------------------------------
-    - name: Detect languages
+    
+    - name: Detect languages and setup
+      if: steps.changed-files.outputs.any_changed == 'true'
       id: detect
       shell: bash
       run: |
-        set -euo pipefail
-
+        echo "=== Language Detection ==="
+        
+        # Get the action's path
+        ACTION_PATH="${{ github.action_path }}"
+        
+        # Write changed files
         echo "${{ steps.changed-files.outputs.all_changed_files }}" > changed_files.txt
-
+        
+        # Initialize detection flags
         HAS_CPP=false
         HAS_JS=false
         HAS_RUST=false
@@ -59,50 +59,92 @@ runs:
         HAS_SWIFT=false
         HAS_JAVA=false
         HAS_FLUTTER=false
-
-        while IFS= read -r file; do
+        
+        # Clean old files
+        rm -f cpp_files.txt js_files.txt rust_files.txt kotlin_files.txt swift_files.txt java_files.txt flutter_files.txt
+        
+        # Process each changed file
+        for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
           case "$file" in
-            *.c|*.cpp|*.h|*.hpp) HAS_CPP=true ;;
-            *.js|*.jsx|*.ts|*.tsx) HAS_JS=true ;;
-            *.rs) HAS_RUST=true ;;
-            *.kt) HAS_KOTLIN=true ;;
-            *.swift) HAS_SWIFT=true ;;
-            *.java) HAS_JAVA=true ;;
-            *.dart) HAS_FLUTTER=true ;;
+            *.c|*.cpp|*.h|*.hpp)
+              HAS_CPP=true
+              echo "$file" >> cpp_files.txt
+              ;;
+            *.js|*.jsx|*.ts|*.tsx)
+              HAS_JS=true
+              echo "$file" >> js_files.txt
+              ;;
+            *.rs)
+              HAS_RUST=true
+              echo "$file" >> rust_files.txt
+              ;;
+            *.kt)
+              HAS_KOTLIN=true
+              echo "$file" >> kotlin_files.txt
+              ;;
+            *.swift)
+              HAS_SWIFT=true
+              echo "$file" >> swift_files.txt
+              ;;
+            *.java)
+              HAS_JAVA=true
+              echo "$file" >> java_files.txt
+              ;;
+            *.dart)
+              HAS_FLUTTER=true
+              echo "$file" >> flutter_files.txt
+              ;;
           esac
-        done < changed_files.txt
-
-        echo "has_cpp=$HAS_CPP" >> "$GITHUB_OUTPUT"
-        echo "has_js=$HAS_JS" >> "$GITHUB_OUTPUT"
-        echo "has_rust=$HAS_RUST" >> "$GITHUB_OUTPUT"
-        echo "has_kotlin=$HAS_KOTLIN" >> "$GITHUB_OUTPUT"
-        echo "has_swift=$HAS_SWIFT" >> "$GITHUB_OUTPUT"
-        echo "has_java=$HAS_JAVA" >> "$GITHUB_OUTPUT"
-        echo "has_flutter=$HAS_FLUTTER" >> "$GITHUB_OUTPUT"
-
-    # ------------------------------------------------------------
-    # Tool setup (PINNED + SAFE)
-    # ------------------------------------------------------------
+        done
+        
+        # Show detected files
+        [ "$HAS_CPP" = true ] && echo "✓ C/C++ detected: $(wc -l < cpp_files.txt 2>/dev/null || echo 0) files"
+        [ "$HAS_JS" = true ] && echo "✓ JavaScript detected: $(wc -l < js_files.txt 2>/dev/null || echo 0) files"
+        [ "$HAS_RUST" = true ] && echo "✓ Rust detected: $(wc -l < rust_files.txt 2>/dev/null || echo 0) files"
+        [ "$HAS_KOTLIN" = true ] && echo "✓ Kotlin detected: $(wc -l < kotlin_files.txt 2>/dev/null || echo 0) files"
+        [ "$HAS_SWIFT" = true ] && echo "✓ Swift detected: $(wc -l < swift_files.txt 2>/dev/null || echo 0) files"
+        [ "$HAS_JAVA" = true ] && echo "✓ Java detected: $(wc -l < java_files.txt 2>/dev/null || echo 0) files"
+        [ "$HAS_FLUTTER" = true ] && echo "✓ Dart detected: $(wc -l < flutter_files.txt 2>/dev/null || echo 0) files"
+        
+        # Export to outputs
+        echo "has_cpp=$HAS_CPP" >> $GITHUB_OUTPUT
+        echo "has_js=$HAS_JS" >> $GITHUB_OUTPUT
+        echo "has_rust=$HAS_RUST" >> $GITHUB_OUTPUT
+        echo "has_kotlin=$HAS_KOTLIN" >> $GITHUB_OUTPUT
+        echo "has_swift=$HAS_SWIFT" >> $GITHUB_OUTPUT
+        echo "has_java=$HAS_JAVA" >> $GITHUB_OUTPUT
+        echo "has_flutter=$HAS_FLUTTER" >> $GITHUB_OUTPUT
+        
+        # Save action path for later steps
+        echo "ACTION_PATH=$ACTION_PATH" >> $GITHUB_ENV
+    
+    - name: Install C/C++ tools
+      if: steps.detect.outputs.has_cpp == 'true'
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y cppcheck
+    
     - name: Setup Node.js
       if: steps.detect.outputs.has_js == 'true'
-      uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8
+      uses: actions/setup-node@v4
       with:
         node-version: '20'
-
+    
     - name: Setup Rust
       if: steps.detect.outputs.has_rust == 'true'
-      uses: dtolnay/rust-toolchain@f3b6fddbdc8f7dfbbfc46c8a7f5a7d2c7b68b61f
+      uses: dtolnay/rust-toolchain@stable
       with:
         toolchain: stable
         components: clippy
-
+    
     - name: Setup Java
       if: steps.detect.outputs.has_java == 'true'
-      uses: actions/setup-java@4e7e684fbb6e33f88ecb2cf1e6b3797739cf499b
+      uses: actions/setup-java@v4
       with:
-        distribution: temurin
+        distribution: 'temurin'
         java-version: '17'
-
+    
     - name: Install Kotlin linter
       if: steps.detect.outputs.has_kotlin == 'true'
       shell: bash
@@ -110,61 +152,123 @@ runs:
         curl -sSLO https://github.com/pinterest/ktlint/releases/download/1.0.1/ktlint
         chmod +x ktlint
         sudo mv ktlint /usr/local/bin/
-
-    # ------------------------------------------------------------
-    # Run sanity checks (SAFE timeout, original behavior)
-    # ------------------------------------------------------------
+    
     - name: Run sanity checks
+      if: steps.changed-files.outputs.any_changed == 'true'
       id: run-checks
+      continue-on-error: true
       shell: bash
       run: |
         echo "================================"
         echo "   RUNNING SANITY CHECKS"
         echo "================================"
         echo ""
-
+        
         OVERALL_STATUS=0
         ACTION_PATH="${{ github.action_path }}"
-        TIMEOUT=600
-
-        run_check () {
-          local name="$1"
-          local script="$2"
-
-          echo ">>> Running $name checks..."
-          if timeout "${TIMEOUT}s" bash "$script" 2>&1 | tee "${name}_check.txt"; then
-            echo "✅ $name checks passed"
+        
+        # Run C/C++ checks
+        if [ "${{ steps.detect.outputs.has_cpp }}" = "true" ]; then
+          echo ">>> Running C/C++ checks..."
+          if timeout 600 bash "$ACTION_PATH/scripts/cpp-check.sh" 2>&1 | tee cpp_check.txt; then
+            echo "✅ C/C++ checks passed"
           else
-            echo "❌ $name checks failed"
+            echo "❌ C/C++ checks failed"
             OVERALL_STATUS=1
           fi
           echo ""
-        }
-
-        [[ "${{ steps.detect.outputs.has_cpp }}" == "true" ]] && run_check cpp "$ACTION_PATH/scripts/cpp-check.sh"
-        [[ "${{ steps.detect.outputs.has_js }}" == "true" ]] && run_check js "$ACTION_PATH/scripts/js-check.sh"
-        [[ "${{ steps.detect.outputs.has_rust }}" == "true" ]] && run_check rust "$ACTION_PATH/scripts/rust-check.sh"
-        [[ "${{ steps.detect.outputs.has_kotlin }}" == "true" ]] && run_check kotlin "$ACTION_PATH/scripts/kotlin-check.sh"
-        [[ "${{ steps.detect.outputs.has_swift }}" == "true" ]] && run_check swift "$ACTION_PATH/scripts/swift-check.sh"
-        [[ "${{ steps.detect.outputs.has_java }}" == "true" ]] && run_check java "$ACTION_PATH/scripts/java-check.sh"
-        [[ "${{ steps.detect.outputs.has_flutter }}" == "true" ]] && run_check flutter "$ACTION_PATH/scripts/flutter-check.sh"
-
+        fi
+        
+        # Run JavaScript checks
+        if [ "${{ steps.detect.outputs.has_js }}" = "true" ]; then
+          echo ">>> Running JavaScript checks..."
+          if timeout 600 bash "$ACTION_PATH/scripts/js-check.sh" 2>&1 | tee js_check.txt; then
+            echo "✅ JavaScript checks passed"
+          else
+            echo "❌ JavaScript checks failed"
+            OVERALL_STATUS=1
+          fi
+          echo ""
+        fi
+        
+        # Run Rust checks
+        if [ "${{ steps.detect.outputs.has_rust }}" = "true" ]; then
+          echo ">>> Running Rust checks..."
+          if timeout 600 bash "$ACTION_PATH/scripts/rust-check.sh" 2>&1 | tee rust_check.txt; then
+            echo "✅ Rust checks passed"
+          else
+            echo "❌ Rust checks failed"
+            OVERALL_STATUS=1
+          fi
+          echo ""
+        fi
+        
+        # Run Kotlin checks
+        if [ "${{ steps.detect.outputs.has_kotlin }}" = "true" ]; then
+          echo ">>> Running Kotlin checks..."
+          if timeout 600 bash "$ACTION_PATH/scripts/kotlin-check.sh" 2>&1 | tee kotlin_check.txt; then
+            echo "✅ Kotlin checks passed"
+          else
+            echo "❌ Kotlin checks failed"
+            OVERALL_STATUS=1
+          fi
+          echo ""
+        fi
+        
+        # Run Swift checks
+        if [ "${{ steps.detect.outputs.has_swift }}" = "true" ]; then
+          echo ">>> Running Swift checks..."
+          if timeout 600 bash "$ACTION_PATH/scripts/swift-check.sh" 2>&1 | tee swift_check.txt; then
+            echo "✅ Swift checks passed"
+          else
+            echo "❌ Swift checks failed"
+            OVERALL_STATUS=1
+          fi
+          echo ""
+        fi
+        
+        # Run Java checks
+        if [ "${{ steps.detect.outputs.has_java }}" = "true" ]; then
+          echo ">>> Running Java checks..."
+          if timeout 600 bash "$ACTION_PATH/scripts/java-check.sh" 2>&1 | tee java_check.txt; then
+            echo "✅ Java checks passed"
+          else
+            echo "❌ Java checks failed"
+            OVERALL_STATUS=1
+          fi
+          echo ""
+        fi
+        
+        # Run Flutter checks
+        if [ "${{ steps.detect.outputs.has_flutter }}" = "true" ]; then
+          echo ">>> Running Flutter checks..."
+          if timeout 600 bash "$ACTION_PATH/scripts/flutter-check.sh" 2>&1 | tee flutter_check.txt; then
+            echo "✅ Flutter checks passed"
+          else
+            echo "❌ Flutter checks failed"
+            OVERALL_STATUS=1
+          fi
+          echo ""
+        fi
+        
+        # Combine all check results
         cat *_check.txt 2>/dev/null > check_results.txt || echo "No check results" > check_results.txt
-
+        
+        # Final summary
+        echo "================================"
         if [ $OVERALL_STATUS -eq 0 ]; then
-          echo "status=success" >> "$GITHUB_OUTPUT"
+          echo "✅ ALL SANITY CHECKS PASSED"
+          echo "status=success" >> $GITHUB_OUTPUT
           exit 0
         else
-          echo "status=failure" >> "$GITHUB_OUTPUT"
+          echo "❌ SANITY CHECKS FAILED"
+          echo "status=failure" >> $GITHUB_OUTPUT
           exit 1
         fi
-
-    # ------------------------------------------------------------
-    # PR COMMENT (UNCHANGED – EXACT UX)
-    # ------------------------------------------------------------
+    
     - name: Post results as PR comment
       if: github.event_name == 'pull_request' && always()
-      uses: actions/github-script@7d4b21e37b0c9d7f7b7b60db9a1c0d2b0c3e92b3
+      uses: actions/github-script@v7
       with:
         github-token: ${{ inputs.github-token }}
         script: |
@@ -172,16 +276,73 @@ runs:
           const status = '${{ steps.run-checks.outputs.status }}';
           const statusEmoji = status === 'success' ? '✅' : '❌';
           const statusText = status === 'success' ? 'PASSED' : 'FAILED';
-
+          
           let results = '';
-          try { results = fs.readFileSync('check_results.txt', 'utf8'); }
-          catch { results = 'Could not read check results'; }
-
-          let errorSummary = '';
-          if (status === 'failure') {
-            errorSummary = '\n## 🚨 Key Issues Found:\n\n' + results + '\n---\n';
+          try {
+            results = fs.readFileSync('check_results.txt', 'utf8');
+          } catch (error) {
+            results = 'Could not read check results';
           }
-
+          
+          let errorSummary = '';
+          
+          if (status === 'failure') {
+            const lines = results.split('\n');
+            errorSummary = '\n## 🚨 Key Issues Found:\n\n';
+            
+            let currentLanguage = '';
+            let languageErrors = {};
+            
+            for (let i = 0; i < lines.length; i++) {
+              const line = lines[i];
+              
+              if (line.includes('C/C++ SANITY CHECK')) {
+                currentLanguage = 'C/C++';
+                languageErrors[currentLanguage] = [];
+              } else if (line.includes('RUST SANITY CHECK')) {
+                currentLanguage = 'Rust';
+                languageErrors[currentLanguage] = [];
+              } else if (line.includes('JAVASCRIPT SANITY CHECK')) {
+                currentLanguage = 'JavaScript';
+                languageErrors[currentLanguage] = [];
+              } else if (line.includes('KOTLIN SANITY CHECK')) {
+                currentLanguage = 'Kotlin';
+                languageErrors[currentLanguage] = [];
+              } else if (line.includes('JAVA SANITY CHECK')) {
+                currentLanguage = 'Java';
+                languageErrors[currentLanguage] = [];
+              } else if (line.includes('SWIFT SANITY CHECK')) {
+                currentLanguage = 'Swift';
+                languageErrors[currentLanguage] = [];
+              } else if (line.includes('FLUTTER/DART SANITY CHECK')) {
+                currentLanguage = 'Dart/Flutter';
+                languageErrors[currentLanguage] = [];
+              }
+              
+              if (currentLanguage && line.match(/.*:\d+:.*(?:error|warning):/)) {
+                languageErrors[currentLanguage].push(line.trim());
+              }
+            }
+            
+            let totalErrors = 0;
+            for (const [lang, errors] of Object.entries(languageErrors)) {
+              if (errors.length > 0) {
+                totalErrors += errors.length;
+                errorSummary += `### ${lang}\n`;
+                errors.forEach(error => {
+                  errorSummary += `${error}\n`;
+                });
+                errorSummary += '\n';
+              }
+            }
+            
+            if (totalErrors > 0) {
+              errorSummary += `**Total issues found: ${totalErrors}**\n\n`;
+            }
+            
+            errorSummary += '---\n';
+          }
+          
           const languagesList = [];
           if ('${{ steps.detect.outputs.has_cpp }}' === 'true') languagesList.push('C/C++');
           if ('${{ steps.detect.outputs.has_js }}' === 'true') languagesList.push('JavaScript/TypeScript');
@@ -190,51 +351,44 @@ runs:
           if ('${{ steps.detect.outputs.has_swift }}' === 'true') languagesList.push('Swift');
           if ('${{ steps.detect.outputs.has_java }}' === 'true') languagesList.push('Java');
           if ('${{ steps.detect.outputs.has_flutter }}' === 'true') languagesList.push('Dart/Flutter');
-
+          
           const body = `## ${statusEmoji} Sanity Check ${statusText}
-
-          ${status === 'failure'
-            ? '⚠️ **Action Required:** Please fix the issues below before merging.\n'
-            : '✅ **All checks passed!** Your code meets quality standards.\n'}
-
+          
+          ${status === 'failure' ? '⚠️ **Action Required:** Please fix the issues below before merging.\n' : '✅ **All checks passed!** Your code meets quality standards.\n'}
+          
           **Languages Checked:** ${languagesList.join(', ') || 'None'}
-
+          
           ${errorSummary}
-
+          
           <details>
           <summary>📋 Click to view full detailed results</summary>
-
+          
           \`\`\`
           ${results}
           \`\`\`
-
+          
           </details>
-
+          
           ---
-          ${status === 'failure'
-            ? '**Next Steps:** Fix the reported issues, commit your changes, and the checks will re-run automatically.\n\n'
-            : ''}*Automated sanity checks completed at ${new Date().toISOString()}*`;
-
+          ${status === 'failure' ? '**Next Steps:** Fix the reported issues, commit your changes, and the checks will re-run automatically.\n\n' : ''}*Automated sanity checks completed at ${new Date().toISOString()}*`;
+          
           await github.rest.issues.createComment({
             issue_number: context.issue.number,
             owner: context.repo.owner,
             repo: context.repo.repo,
-            body
+            body: body
           });
-
-    # ------------------------------------------------------------
-    # Labels (UNCHANGED – EXACT BEHAVIOR)
-    # ------------------------------------------------------------
+    
     - name: Add label
       if: github.event_name == 'pull_request' && always()
-      uses: actions/github-script@7d4b21e37b0c9d7f7b7b60db9a1c0d2b0c3e92b3
+      uses: actions/github-script@v7
       with:
         github-token: ${{ inputs.github-token }}
         script: |
           const status = '${{ steps.run-checks.outputs.status }}';
           const label = status === 'success' ? 'sanity-check-passed' : 'sanity-check-failed';
           const oppositeLabel = status === 'success' ? 'sanity-check-failed' : 'sanity-check-passed';
-
+          
           try {
             await github.rest.issues.removeLabel({
               issue_number: context.issue.number,
@@ -242,8 +396,10 @@ runs:
               repo: context.repo.repo,
               name: oppositeLabel
             });
-          } catch {}
-
+          } catch (error) {
+            // Label doesn't exist, that's fine
+          }
+          
           try {
             await github.rest.issues.addLabels({
               issue_number: context.issue.number,
@@ -251,18 +407,30 @@ runs:
               repo: context.repo.repo,
               labels: [label]
             });
-          } catch {
-            const color = status === 'success' ? '0e8a16' : 'd73a4a';
-            await github.rest.issues.createLabel({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              name: label,
-              color
-            });
-            await github.rest.issues.addLabels({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              labels: [label]
-            });
+          } catch (error) {
+            try {
+              const color = status === 'success' ? '0e8a16' : 'd73a4a';
+              await github.rest.issues.createLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: label,
+                color: color,
+                description: `Sanity check ${status === 'success' ? 'passed' : 'failed'}`
+              });
+              await github.rest.issues.addLabels({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                labels: [label]
+              });
+            } catch (createError) {
+              console.error(`Failed to create/add label: ${createError.message}`);
+            }
           }
+    
+    - name: Fail workflow if checks failed
+      if: steps.run-checks.outputs.status == 'failure'
+      shell: bash
+      run: |
+        echo "::error::Sanity checks failed. Please fix the issues before merging."
+        exit 1
