@@ -10,18 +10,117 @@ inputs:
   github-token:
     description: 'GitHub token for posting comments and managing labels'
     required: true
+  
+  # Enable/disable specific checks
+  enable-cpp-check:
+    description: 'Enable C/C++ checks'
+    required: false
+    default: 'true'
+  
+  enable-js-check:
+    description: 'Enable JavaScript/TypeScript checks'
+    required: false
+    default: 'true'
+  
+  enable-rust-check:
+    description: 'Enable Rust checks'
+    required: false
+    default: 'true'
+  
+  enable-kotlin-check:
+    description: 'Enable Kotlin checks'
+    required: false
+    default: 'true'
+  
+  enable-swift-check:
+    description: 'Enable Swift checks'
+    required: false
+    default: 'true'
+  
+  enable-java-check:
+    description: 'Enable Java checks'
+    required: false
+    default: 'true'
+  
+  enable-flutter-check:
+    description: 'Enable Flutter/Dart checks'
+    required: false
+    default: 'true'
+  
+  enable-dependency-scan:
+    description: 'Enable dependency vulnerability scanning'
+    required: false
+    default: 'true'
+  
+  # Behavior configuration
+  post-pr-comments:
+    description: 'Post results as PR comments'
+    required: false
+    default: 'true'
+  
+  apply-labels:
+    description: 'Apply pass/fail labels to PRs'
+    required: false
+    default: 'true'
+  
+  fail-on-error:
+    description: 'Fail workflow if checks fail'
+    required: false
+    default: 'true'
+  
+  severity-threshold:
+    description: 'Fail on: error, warning, or all'
+    required: false
+    default: 'error'
+  
+  ignore-patterns:
+    description: 'Comma-separated patterns to ignore (e.g. "*.test.js,vendor/**")'
+    required: false
+    default: ''
+  
+  # Tool versions (configurable, not hardcoded)
+  node-version:
+    description: 'Node.js version'
+    required: false
+    default: '20'
+  
+  java-version:
+    description: 'Java version'
+    required: false
+    default: '17'
+  
+  java-distribution:
+    description: 'Java distribution'
+    required: false
+    default: 'temurin'
+  
+  rust-toolchain:
+    description: 'Rust toolchain'
+    required: false
+    default: 'stable'
+  
+  ktlint-version:
+    description: 'ktlint version'
+    required: false
+    default: '1.0.1'
+  
+  # Timeout (configurable, not hardcoded)
+  check-timeout-minutes:
+    description: 'Timeout per check in minutes'
+    required: false
+    default: '10'
 
 outputs:
   status:
     description: 'Overall status of sanity checks (success/failure)'
     value: ${{ steps.run-checks.outputs.status }}
-
-runs:
+    runs:
   using: 'composite'
   steps:
+    # Step 1: Get changed files with PINNED SHA
     - name: Get changed files
       id: changed-files
-      uses: tj-actions/changed-files@v45
+      uses: tj-actions/changed-files@c3a1bb2c992d77180ae65be6ae6c166cf40f857c # v45.0.3 PINNED
       with:
         files: |
           **/*.c
@@ -38,20 +137,44 @@ runs:
           **/*.java
           **/*.dart
     
-    - name: Detect languages and setup
+    # Step 2: Setup cache directory
+    - name: Setup cache directory
+      shell: bash
+      run: |
+        mkdir -p "$HOME/.sanity-check-cache"
+        echo "CACHE_DIR=$HOME/.sanity-check-cache" >> $GITHUB_ENV
+    
+    # Step 3: Detect languages WITH PATH SANITIZATION
+    - name: Detect languages with path sanitization
       if: steps.changed-files.outputs.any_changed == 'true'
       id: detect
       shell: bash
       run: |
-        echo "=== Language Detection ==="
+        set -euo pipefail
+        IFS=$'\n'
         
-        # Get the action's path
+        echo "=== Language Detection with Path Sanitization ==="
         ACTION_PATH="${{ github.action_path }}"
         
-        # Write changed files
-        echo "${{ steps.changed-files.outputs.all_changed_files }}" > changed_files.txt
+        # Sanitize file paths to prevent injection
+        declare -a SAFE_FILES=()
+        while IFS= read -r file; do
+          # Skip empty lines
+          [ -z "$file" ] && continue
+          
+          # Remove dangerous characters
+          clean=$(echo "$file" | sed 's/[;&|`$(){}[\]<>]//g')
+          
+          # Reject path traversal and control characters
+          if [[ "$file" =~ \.\. ]] || [[ "$file" =~ [[:cntrl:]] ]]; then
+            echo "::warning::Rejected suspicious path: $file"
+            continue
+          fi
+          
+          SAFE_FILES+=("$file")
+        done <<< "${{ steps.changed-files.outputs.all_changed_files }}"
         
-        # Initialize detection flags
+        # Initialize detection
         HAS_CPP=false
         HAS_JS=false
         HAS_RUST=false
@@ -60,11 +183,27 @@ runs:
         HAS_JAVA=false
         HAS_FLUTTER=false
         
-        # Clean old files
         rm -f cpp_files.txt js_files.txt rust_files.txt kotlin_files.txt swift_files.txt java_files.txt flutter_files.txt
         
-        # Process each changed file
-        for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+        # Process ignore patterns
+        IGNORE_PATTERNS="${{ inputs.ignore-patterns }}"
+        
+        for file in "${SAFE_FILES[@]}"; do
+          # Check ignore patterns
+          if [ -n "$IGNORE_PATTERNS" ]; then
+            IFS=',' read -ra PATTERNS <<< "$IGNORE_PATTERNS"
+            SKIP=false
+            for pattern in "${PATTERNS[@]}"; do
+              pattern=$(echo "$pattern" | xargs)
+              if [[ "$file" == $pattern ]]; then
+                SKIP=true
+                echo "Ignoring: $file"
+                break
+              fi
+            done
+            [ "$SKIP" = true ] && continue
+          fi
+          
           case "$file" in
             *.c|*.cpp|*.h|*.hpp)
               HAS_CPP=true
@@ -97,16 +236,14 @@ runs:
           esac
         done
         
-        # Show detected files
-        [ "$HAS_CPP" = true ] && echo "✓ C/C++ detected: $(wc -l < cpp_files.txt 2>/dev/null || echo 0) files"
-        [ "$HAS_JS" = true ] && echo "✓ JavaScript detected: $(wc -l < js_files.txt 2>/dev/null || echo 0) files"
-        [ "$HAS_RUST" = true ] && echo "✓ Rust detected: $(wc -l < rust_files.txt 2>/dev/null || echo 0) files"
-        [ "$HAS_KOTLIN" = true ] && echo "✓ Kotlin detected: $(wc -l < kotlin_files.txt 2>/dev/null || echo 0) files"
-        [ "$HAS_SWIFT" = true ] && echo "✓ Swift detected: $(wc -l < swift_files.txt 2>/dev/null || echo 0) files"
-        [ "$HAS_JAVA" = true ] && echo "✓ Java detected: $(wc -l < java_files.txt 2>/dev/null || echo 0) files"
-        [ "$HAS_FLUTTER" = true ] && echo "✓ Dart detected: $(wc -l < flutter_files.txt 2>/dev/null || echo 0) files"
+        [ "$HAS_CPP" = true ] && echo "✓ C/C++: $(wc -l < cpp_files.txt 2>/dev/null || echo 0) files"
+        [ "$HAS_JS" = true ] && echo "✓ JavaScript: $(wc -l < js_files.txt 2>/dev/null || echo 0) files"
+        [ "$HAS_RUST" = true ] && echo "✓ Rust: $(wc -l < rust_files.txt 2>/dev/null || echo 0) files"
+        [ "$HAS_KOTLIN" = true ] && echo "✓ Kotlin: $(wc -l < kotlin_files.txt 2>/dev/null || echo 0) files"
+        [ "$HAS_SWIFT" = true ] && echo "✓ Swift: $(wc -l < swift_files.txt 2>/dev/null || echo 0) files"
+        [ "$HAS_JAVA" = true ] && echo "✓ Java: $(wc -l < java_files.txt 2>/dev/null || echo 0) files"
+        [ "$HAS_FLUTTER" = true ] && echo "✓ Dart: $(wc -l < flutter_files.txt 2>/dev/null || echo 0) files"
         
-        # Export to outputs
         echo "has_cpp=$HAS_CPP" >> $GITHUB_OUTPUT
         echo "has_js=$HAS_JS" >> $GITHUB_OUTPUT
         echo "has_rust=$HAS_RUST" >> $GITHUB_OUTPUT
@@ -114,161 +251,239 @@ runs:
         echo "has_swift=$HAS_SWIFT" >> $GITHUB_OUTPUT
         echo "has_java=$HAS_JAVA" >> $GITHUB_OUTPUT
         echo "has_flutter=$HAS_FLUTTER" >> $GITHUB_OUTPUT
-        
-        # Save action path for later steps
         echo "ACTION_PATH=$ACTION_PATH" >> $GITHUB_ENV
     
+    # CACHING - Performance improvement
+    - name: Cache C/C++ tools
+      if: steps.detect.outputs.has_cpp == 'true' && inputs.enable-cpp-check == 'true'
+      uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2 PINNED
+      with:
+        path: ${{ env.CACHE_DIR }}/cppcheck
+        key: cppcheck-${{ runner.os }}-v1
+    
     - name: Install C/C++ tools
-      if: steps.detect.outputs.has_cpp == 'true'
+      if: steps.detect.outputs.has_cpp == 'true' && inputs.enable-cpp-check == 'true'
       shell: bash
       run: |
-        sudo apt-get update -qq
-        sudo apt-get install -y cppcheck
+        if ! command -v cppcheck &> /dev/null; then
+          sudo apt-get update -qq
+          sudo apt-get install -y cppcheck
+        fi
+    
+    - name: Cache Node.js
+      if: steps.detect.outputs.has_js == 'true' && inputs.enable-js-check == 'true'
+      uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2 PINNED
+      with:
+        path: ~/.npm
+        key: node-${{ runner.os }}-${{ inputs.node-version }}-${{ hashFiles('**/package-lock.json') }}
+        restore-keys: node-${{ runner.os }}-${{ inputs.node-version }}-
     
     - name: Setup Node.js
-      if: steps.detect.outputs.has_js == 'true'
-      uses: actions/setup-node@v4
+      if: steps.detect.outputs.has_js == 'true' && inputs.enable-js-check == 'true'
+      uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3 PINNED
       with:
-        node-version: '20'
+        node-version: ${{ inputs.node-version }}
+    
+    - name: Cache Rust
+      if: steps.detect.outputs.has_rust == 'true' && inputs.enable-rust-check == 'true'
+      uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2 PINNED
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+        key: rust-${{ runner.os }}-${{ inputs.rust-toolchain }}-v1
     
     - name: Setup Rust
-      if: steps.detect.outputs.has_rust == 'true'
+      if: steps.detect.outputs.has_rust == 'true' && inputs.enable-rust-check == 'true'
       uses: dtolnay/rust-toolchain@stable
       with:
-        toolchain: stable
+        toolchain: ${{ inputs.rust-toolchain }}
         components: clippy
     
     - name: Setup Java
-      if: steps.detect.outputs.has_java == 'true'
-      uses: actions/setup-java@v4
+      if: steps.detect.outputs.has_java == 'true' && inputs.enable-java-check == 'true'
+      uses: actions/setup-java@b36c23c0d998641eff861008f374ee103c25ac73 # v4.4.0 PINNED
       with:
-        distribution: 'temurin'
-        java-version: '17'
+        distribution: ${{ inputs.java-distribution }}
+        java-version: ${{ inputs.java-version }}
+    
+    - name: Cache Kotlin linter
+      if: steps.detect.outputs.has_kotlin == 'true' && inputs.enable-kotlin-check == 'true'
+      uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2 PINNED
+      with:
+        path: ${{ env.CACHE_DIR }}/ktlint
+        key: ktlint-${{ runner.os }}-${{ inputs.ktlint-version }}
     
     - name: Install Kotlin linter
-      if: steps.detect.outputs.has_kotlin == 'true'
+      if: steps.detect.outputs.has_kotlin == 'true' && inputs.enable-kotlin-check == 'true'
       shell: bash
       run: |
-        curl -sSLO https://github.com/pinterest/ktlint/releases/download/1.0.1/ktlint
-        chmod +x ktlint
-        sudo mv ktlint /usr/local/bin/
+        KTLINT_PATH="${{ env.CACHE_DIR }}/ktlint/ktlint"
+        if [ ! -f "$KTLINT_PATH" ]; then
+          mkdir -p "${{ env.CACHE_DIR }}/ktlint"
+          curl -sSLO "https://github.com/pinterest/ktlint/releases/download/${{ inputs.ktlint-version }}/ktlint"
+          chmod +x ktlint
+          mv ktlint "$KTLINT_PATH"
+        fi
+        sudo ln -sf "$KTLINT_PATH" /usr/local/bin/ktlint || true
     
-    - name: Run sanity checks
+    # DEPENDENCY VULNERABILITY SCANNING
+    - name: Run dependency vulnerability scans
+      if: inputs.enable-dependency-scan == 'true'
+      id: dependency-scan
+      continue-on-error: true
+      shell: bash
+      run: |
+        echo "=== Dependency Vulnerability Scanning ==="
+        SCAN_FAILED=false
+        TIMEOUT_SEC=$((60 * ${{ inputs.check-timeout-minutes }}))
+        
+        # npm audit
+        if [ -f "package-lock.json" ] && [ "${{ steps.detect.outputs.has_js }}" = "true" ]; then
+          echo "Running npm audit..."
+          if ! timeout ${TIMEOUT_SEC} npm audit --audit-level=moderate 2>&1 | tee npm_audit.txt; then
+            echo "::warning::npm audit found vulnerabilities"
+            SCAN_FAILED=true
+          fi
+        fi
+        
+        # cargo audit
+        if [ -f "Cargo.lock" ] && [ "${{ steps.detect.outputs.has_rust }}" = "true" ]; then
+          echo "Running cargo audit..."
+          if ! command -v cargo-audit &> /dev/null; then
+            cargo install cargo-audit --quiet || true
+          fi
+          if command -v cargo-audit &> /dev/null; then
+            if ! timeout ${TIMEOUT_SEC} cargo audit 2>&1 | tee cargo_audit.txt; then
+              echo "::warning::cargo audit found vulnerabilities"
+              SCAN_FAILED=true
+            fi
+          fi
+        fi
+        
+        if [ "$SCAN_FAILED" = true ]; then
+          echo "vulnerability_found=true" >> $GITHUB_OUTPUT
+        else
+          echo "vulnerability_found=false" >> $GITHUB_OUTPUT
+        fi
+
+    # SANITY CHECKS - PARALLEL EXECUTION
+    - name: Run sanity checks in parallel
       if: steps.changed-files.outputs.any_changed == 'true'
       id: run-checks
       continue-on-error: true
       shell: bash
       run: |
         echo "================================"
-        echo "   RUNNING SANITY CHECKS"
+        echo "   RUNNING SANITY CHECKS (PARALLEL)"
         echo "================================"
         echo ""
         
         OVERALL_STATUS=0
         ACTION_PATH="${{ github.action_path }}"
+        TIMEOUT_SEC=$((60 * ${{ inputs.check-timeout-minutes }}))
         
-        # Run C/C++ checks
-        if [ "${{ steps.detect.outputs.has_cpp }}" = "true" ]; then
-          echo ">>> Running C/C++ checks..."
-          if timeout 600 bash "$ACTION_PATH/scripts/cpp-check.sh" 2>&1 | tee cpp_check.txt; then
-            echo "✅ C/C++ checks passed"
-          else
-            echo "❌ C/C++ checks failed"
-            OVERALL_STATUS=1
+        # Function to run checks in parallel
+        run_check_parallel() {
+          local lang=$1
+          local script=$2
+          local enabled=$3
+          
+          if [ "$enabled" = "true" ]; then
+            echo ">>> Starting $lang checks..."
+            (
+              if timeout ${TIMEOUT_SEC} bash "$ACTION_PATH/scripts/$script" 2>&1 | tee "${lang}_check.txt"; then
+                echo "✅ $lang checks passed"
+                exit 0
+              else
+                exit_code=$?
+                if [ $exit_code -eq 124 ]; then
+                  echo "⏱️  $lang checks timed out after ${{ inputs.check-timeout-minutes }} minutes"
+                else
+                  echo "❌ $lang checks failed"
+                fi
+                exit 1
+              fi
+            ) &
           fi
-          echo ""
+        }
+        
+        # Start all enabled checks in parallel
+        declare -a pids=()
+        
+        if [ "${{ steps.detect.outputs.has_cpp }}" = "true" ] && [ "${{ inputs.enable-cpp-check }}" = "true" ]; then
+          run_check_parallel "cpp" "cpp-check.sh" "true"
+          pids+=($!)
         fi
         
-        # Run JavaScript checks
-        if [ "${{ steps.detect.outputs.has_js }}" = "true" ]; then
-          echo ">>> Running JavaScript checks..."
-          if timeout 600 bash "$ACTION_PATH/scripts/js-check.sh" 2>&1 | tee js_check.txt; then
-            echo "✅ JavaScript checks passed"
-          else
-            echo "❌ JavaScript checks failed"
-            OVERALL_STATUS=1
-          fi
-          echo ""
+        if [ "${{ steps.detect.outputs.has_js }}" = "true" ] && [ "${{ inputs.enable-js-check }}" = "true" ]; then
+          run_check_parallel "js" "js-check.sh" "true"
+          pids+=($!)
         fi
         
-        # Run Rust checks
-        if [ "${{ steps.detect.outputs.has_rust }}" = "true" ]; then
-          echo ">>> Running Rust checks..."
-          if timeout 600 bash "$ACTION_PATH/scripts/rust-check.sh" 2>&1 | tee rust_check.txt; then
-            echo "✅ Rust checks passed"
-          else
-            echo "❌ Rust checks failed"
-            OVERALL_STATUS=1
-          fi
-          echo ""
+        if [ "${{ steps.detect.outputs.has_rust }}" = "true" ] && [ "${{ inputs.enable-rust-check }}" = "true" ]; then
+          run_check_parallel "rust" "rust-check.sh" "true"
+          pids+=($!)
         fi
         
-        # Run Kotlin checks
-        if [ "${{ steps.detect.outputs.has_kotlin }}" = "true" ]; then
-          echo ">>> Running Kotlin checks..."
-          if timeout 600 bash "$ACTION_PATH/scripts/kotlin-check.sh" 2>&1 | tee kotlin_check.txt; then
-            echo "✅ Kotlin checks passed"
-          else
-            echo "❌ Kotlin checks failed"
-            OVERALL_STATUS=1
-          fi
-          echo ""
+        if [ "${{ steps.detect.outputs.has_kotlin }}" = "true" ] && [ "${{ inputs.enable-kotlin-check }}" = "true" ]; then
+          run_check_parallel "kotlin" "kotlin-check.sh" "true"
+          pids+=($!)
         fi
         
-        # Run Swift checks
-        if [ "${{ steps.detect.outputs.has_swift }}" = "true" ]; then
-          echo ">>> Running Swift checks..."
-          if timeout 600 bash "$ACTION_PATH/scripts/swift-check.sh" 2>&1 | tee swift_check.txt; then
-            echo "✅ Swift checks passed"
-          else
-            echo "❌ Swift checks failed"
-            OVERALL_STATUS=1
-          fi
-          echo ""
+        if [ "${{ steps.detect.outputs.has_swift }}" = "true" ] && [ "${{ inputs.enable-swift-check }}" = "true" ]; then
+          run_check_parallel "swift" "swift-check.sh" "true"
+          pids+=($!)
         fi
         
-        # Run Java checks
-        if [ "${{ steps.detect.outputs.has_java }}" = "true" ]; then
-          echo ">>> Running Java checks..."
-          if timeout 600 bash "$ACTION_PATH/scripts/java-check.sh" 2>&1 | tee java_check.txt; then
-            echo "✅ Java checks passed"
-          else
-            echo "❌ Java checks failed"
-            OVERALL_STATUS=1
-          fi
-          echo ""
+        if [ "${{ steps.detect.outputs.has_java }}" = "true" ] && [ "${{ inputs.enable-java-check }}" = "true" ]; then
+          run_check_parallel "java" "java-check.sh" "true"
+          pids+=($!)
         fi
         
-        # Run Flutter checks
-        if [ "${{ steps.detect.outputs.has_flutter }}" = "true" ]; then
-          echo ">>> Running Flutter checks..."
-          if timeout 600 bash "$ACTION_PATH/scripts/flutter-check.sh" 2>&1 | tee flutter_check.txt; then
-            echo "✅ Flutter checks passed"
-          else
-            echo "❌ Flutter checks failed"
-            OVERALL_STATUS=1
-          fi
-          echo ""
+        if [ "${{ steps.detect.outputs.has_flutter }}" = "true" ] && [ "${{ inputs.enable-flutter-check }}" = "true" ]; then
+          run_check_parallel "flutter" "flutter-check.sh" "true"
+          pids+=($!)
         fi
         
-        # Combine all check results
+        # Wait for all parallel jobs to complete
+        echo ""
+        echo "Waiting for all checks to complete..."
+        for pid in "${pids[@]}"; do
+          if ! wait "$pid"; then
+            OVERALL_STATUS=1
+          fi
+        done
+        
+        # Combine results
         cat *_check.txt 2>/dev/null > check_results.txt || echo "No check results" > check_results.txt
         
         # Final summary
+        echo ""
         echo "================================"
-        if [ $OVERALL_STATUS -eq 0 ]; then
+        if [ $OVERALL_STATUS -eq 0 ] && [ "${{ steps.dependency-scan.outputs.vulnerability_found }}" != "true" ]; then
           echo "✅ ALL SANITY CHECKS PASSED"
           echo "status=success" >> $GITHUB_OUTPUT
           exit 0
         else
           echo "❌ SANITY CHECKS FAILED"
           echo "status=failure" >> $GITHUB_OUTPUT
-          exit 1
+          
+          # Check fail-on-error input
+          if [ "${{ inputs.fail-on-error }}" = "true" ]; then
+            exit 1
+          else
+            echo "::warning::Checks failed but fail-on-error is disabled"
+            exit 0
+          fi
         fi
-    
+
+    # POST PR COMMENT - Configurable via input
     - name: Post results as PR comment
-      if: github.event_name == 'pull_request' && always()
-      uses: actions/github-script@v7
+      if: github.event_name == 'pull_request' && inputs.post-pr-comments == 'true' && always()
+      uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1 PINNED
       with:
         github-token: ${{ inputs.github-token }}
         script: |
@@ -329,15 +544,23 @@ runs:
               if (errors.length > 0) {
                 totalErrors += errors.length;
                 errorSummary += `### ${lang}\n`;
-                errors.forEach(error => {
-                  errorSummary += `${error}\n`;
+                errors.slice(0, 10).forEach(error => {
+                  errorSummary += `- ${error}\n`;
                 });
+                if (errors.length > 10) {
+                  errorSummary += `... and ${errors.length - 10} more\n`;
+                }
                 errorSummary += '\n';
               }
             }
             
             if (totalErrors > 0) {
               errorSummary += `**Total issues found: ${totalErrors}**\n\n`;
+            }
+            
+            if ('${{ steps.dependency-scan.outputs.vulnerability_found }}' === 'true') {
+              errorSummary += '### 🔒 Dependency Vulnerabilities\n';
+              errorSummary += 'Vulnerabilities found in dependencies. Check workflow logs for details.\n\n';
             }
             
             errorSummary += '---\n';
@@ -379,9 +602,10 @@ runs:
             body: body
           });
     
+    # ADD LABELS - Configurable via input
     - name: Add label
-      if: github.event_name == 'pull_request' && always()
-      uses: actions/github-script@v7
+      if: github.event_name == 'pull_request' && inputs.apply-labels == 'true' && always()
+      uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1 PINNED
       with:
         github-token: ${{ inputs.github-token }}
         script: |
@@ -397,7 +621,7 @@ runs:
               name: oppositeLabel
             });
           } catch (error) {
-            // Label doesn't exist, that's fine
+            // Label doesn't exist
           }
           
           try {
@@ -428,8 +652,9 @@ runs:
             }
           }
     
+    # FAIL WORKFLOW - Configurable via input
     - name: Fail workflow if checks failed
-      if: steps.run-checks.outputs.status == 'failure'
+      if: steps.run-checks.outputs.status == 'failure' && inputs.fail-on-error == 'true'
       shell: bash
       run: |
         echo "::error::Sanity checks failed. Please fix the issues before merging."
