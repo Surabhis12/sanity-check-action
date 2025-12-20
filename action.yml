@@ -363,6 +363,22 @@ runs:
         echo "================================"
         echo ""
         
+        # Debug: Show what was detected
+        echo "DEBUG: Detection results:"
+        echo "  C/C++: ${{ steps.detect.outputs.has_cpp }}"
+        echo "  JS: ${{ steps.detect.outputs.has_js }}"
+        echo "  Rust: ${{ steps.detect.outputs.has_rust }}"
+        echo "  Kotlin: ${{ steps.detect.outputs.has_kotlin }}"
+        echo "  Swift: ${{ steps.detect.outputs.has_swift }}"
+        echo "  Java: ${{ steps.detect.outputs.has_java }}"
+        echo "  Flutter: ${{ steps.detect.outputs.has_flutter }}"
+        echo ""
+        echo "DEBUG: Enable flags:"
+        echo "  C/C++ enabled: ${{ inputs.enable-cpp-check }}"
+        echo "  JS enabled: ${{ inputs.enable-js-check }}"
+        echo "  Java enabled: ${{ inputs.enable-java-check }}"
+        echo ""
+        
         OVERALL_STATUS=0
         ACTION_PATH="${{ github.action_path }}"
         TIMEOUT_SEC=$((60 * ${{ inputs.check-timeout-minutes }}))
@@ -370,69 +386,109 @@ runs:
         run_check_parallel() {
           local lang=$1
           local script=$2
-          local enabled=$3
           
-          if [ "$enabled" = "true" ]; then
-            echo ">>> Starting $lang checks..."
-            (
-              if timeout ${TIMEOUT_SEC} bash "$ACTION_PATH/scripts/$script" 2>&1 | tee "${lang}_check.txt"; then
-                echo "✅ $lang checks passed"
-                exit 0
+          echo ">>> Starting $lang checks in background..."
+          (
+            if timeout ${TIMEOUT_SEC} bash "$ACTION_PATH/scripts/$script" 2>&1 | tee "${lang}_check.txt"; then
+              echo "✅ $lang checks passed"
+              exit 0
+            else
+              exit_code=$?
+              if [ $exit_code -eq 124 ]; then
+                echo "⏱️  $lang checks timed out after ${{ inputs.check-timeout-minutes }} minutes"
               else
-                exit_code=$?
-                if [ $exit_code -eq 124 ]; then
-                  echo "⏱️  $lang checks timed out after ${{ inputs.check-timeout-minutes }} minutes"
-                else
-                  echo "❌ $lang checks failed"
-                fi
-                exit 1
+                echo "❌ $lang checks failed"
               fi
-            ) &
-          fi
+              exit 1
+            fi
+          ) &
         }
         
         declare -a pids=()
         
+        # C/C++ checks
         if [ "${{ steps.detect.outputs.has_cpp }}" = "true" ] && [ "${{ inputs.enable-cpp-check }}" = "true" ]; then
-          run_check_parallel "cpp" "cpp-check.sh" "true"
+          echo "Launching C/C++ check..."
+          run_check_parallel "cpp" "cpp-check.sh"
           pids+=($!)
+          echo "C/C++ check PID: $!"
+        else
+          echo "Skipping C/C++ (detected: ${{ steps.detect.outputs.has_cpp }}, enabled: ${{ inputs.enable-cpp-check }})"
         fi
         
+        # JavaScript checks
         if [ "${{ steps.detect.outputs.has_js }}" = "true" ] && [ "${{ inputs.enable-js-check }}" = "true" ]; then
-          run_check_parallel "js" "js-check.sh" "true"
+          echo "Launching JavaScript check..."
+          run_check_parallel "js" "js-check.sh"
           pids+=($!)
+          echo "JS check PID: $!"
+        else
+          echo "Skipping JS (detected: ${{ steps.detect.outputs.has_js }}, enabled: ${{ inputs.enable-js-check }})"
         fi
         
+        # Rust checks
         if [ "${{ steps.detect.outputs.has_rust }}" = "true" ] && [ "${{ inputs.enable-rust-check }}" = "true" ]; then
-          run_check_parallel "rust" "rust-check.sh" "true"
+          echo "Launching Rust check..."
+          run_check_parallel "rust" "rust-check.sh"
           pids+=($!)
+          echo "Rust check PID: $!"
+        else
+          echo "Skipping Rust (detected: ${{ steps.detect.outputs.has_rust }}, enabled: ${{ inputs.enable-rust-check }})"
         fi
         
+        # Kotlin checks
         if [ "${{ steps.detect.outputs.has_kotlin }}" = "true" ] && [ "${{ inputs.enable-kotlin-check }}" = "true" ]; then
-          run_check_parallel "kotlin" "kotlin-check.sh" "true"
+          echo "Launching Kotlin check..."
+          run_check_parallel "kotlin" "kotlin-check.sh"
           pids+=($!)
+          echo "Kotlin check PID: $!"
+        else
+          echo "Skipping Kotlin (detected: ${{ steps.detect.outputs.has_kotlin }}, enabled: ${{ inputs.enable-kotlin-check }})"
         fi
         
+        # Swift checks
         if [ "${{ steps.detect.outputs.has_swift }}" = "true" ] && [ "${{ inputs.enable-swift-check }}" = "true" ]; then
-          run_check_parallel "swift" "swift-check.sh" "true"
+          echo "Launching Swift check..."
+          run_check_parallel "swift" "swift-check.sh"
           pids+=($!)
+          echo "Swift check PID: $!"
+        else
+          echo "Skipping Swift (detected: ${{ steps.detect.outputs.has_swift }}, enabled: ${{ inputs.enable-swift-check }})"
         fi
         
+        # Java checks
         if [ "${{ steps.detect.outputs.has_java }}" = "true" ] && [ "${{ inputs.enable-java-check }}" = "true" ]; then
-          run_check_parallel "java" "java-check.sh" "true"
+          echo "Launching Java check..."
+          run_check_parallel "java" "java-check.sh"
           pids+=($!)
+          echo "Java check PID: $!"
+        else
+          echo "Skipping Java (detected: ${{ steps.detect.outputs.has_java }}, enabled: ${{ inputs.enable-java-check }})"
         fi
         
+        # Flutter checks
         if [ "${{ steps.detect.outputs.has_flutter }}" = "true" ] && [ "${{ inputs.enable-flutter-check }}" = "true" ]; then
-          run_check_parallel "flutter" "flutter-check.sh" "true"
+          echo "Launching Flutter check..."
+          run_check_parallel "flutter" "flutter-check.sh"
           pids+=($!)
+          echo "Flutter check PID: $!"
+        else
+          echo "Skipping Flutter (detected: ${{ steps.detect.outputs.has_flutter }}, enabled: ${{ inputs.enable-flutter-check }})"
         fi
         
         echo ""
+        echo "Total background jobs started: ${#pids[@]}"
+        echo "PIDs: ${pids[*]}"
+        echo ""
         echo "Waiting for all checks to complete..."
+        
         for pid in "${pids[@]}"; do
+          echo "Waiting for PID $pid..."
           if ! wait "$pid"; then
+            echo "PID $pid failed"
             OVERALL_STATUS=1
+          else
+            echo "PID $pid succeeded"
           fi
         done
         
