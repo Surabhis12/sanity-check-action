@@ -172,11 +172,16 @@ runs:
         HAS_JAVA=false
         HAS_FLUTTER=false
         
+        # Clear all file lists
         rm -f cpp_files.txt js_files.txt rust_files.txt kotlin_files.txt swift_files.txt java_files.txt flutter_files.txt
         
         IGNORE_PATTERNS="${{ inputs.ignore-patterns }}"
         
         for file in "${SAFE_FILES[@]}"; do
+          # Skip if file doesn't exist
+          [ ! -f "$file" ] && continue
+          
+          # Apply ignore patterns
           if [ -n "$IGNORE_PATTERNS" ]; then
             IFS=',' read -ra PATTERNS <<< "$IGNORE_PATTERNS"
             SKIP=false
@@ -191,38 +196,65 @@ runs:
             [ "$SKIP" = true ] && continue
           fi
           
+          # CRITICAL FIX: Use exact extension matching with case statement
           case "$file" in
-            *.c|*.cpp|*.h|*.hpp)
-              HAS_CPP=true
-              echo "$file" >> cpp_files.txt
+            *.c|*.cpp|*.cc|*.cxx|*.h|*.hpp|*.hxx)
+              if [[ "${{ inputs.enable-cpp-check }}" == "true" ]]; then
+                HAS_CPP=true
+                echo "$file" >> cpp_files.txt
+                echo "  CPP: $file"
+              fi
               ;;
-            *.js|*.jsx|*.ts|*.tsx)
-              HAS_JS=true
-              echo "$file" >> js_files.txt
+            *.js|*.jsx|*.ts|*.tsx|*.mjs|*.cjs)
+              if [[ "${{ inputs.enable-js-check }}" == "true" ]]; then
+                HAS_JS=true
+                echo "$file" >> js_files.txt
+                echo "  JS: $file"
+              fi
               ;;
             *.rs)
-              HAS_RUST=true
-              echo "$file" >> rust_files.txt
+              if [[ "${{ inputs.enable-rust-check }}" == "true" ]]; then
+                HAS_RUST=true
+                echo "$file" >> rust_files.txt
+                echo "  RUST: $file"
+              fi
               ;;
-            *.kt)
-              HAS_KOTLIN=true
-              echo "$file" >> kotlin_files.txt
+            *.kt|*.kts)
+              if [[ "${{ inputs.enable-kotlin-check }}" == "true" ]]; then
+                HAS_KOTLIN=true
+                echo "$file" >> kotlin_files.txt
+                echo "  KOTLIN: $file"
+              fi
               ;;
             *.swift)
-              HAS_SWIFT=true
-              echo "$file" >> swift_files.txt
+              if [[ "${{ inputs.enable-swift-check }}" == "true" ]]; then
+                HAS_SWIFT=true
+                echo "$file" >> swift_files.txt
+                echo "  SWIFT: $file"
+              fi
               ;;
             *.java)
-              HAS_JAVA=true
-              echo "$file" >> java_files.txt
+              if [[ "${{ inputs.enable-java-check }}" == "true" ]]; then
+                HAS_JAVA=true
+                echo "$file" >> java_files.txt
+                echo "  JAVA: $file"
+              fi
               ;;
             *.dart)
-              HAS_FLUTTER=true
-              echo "$file" >> flutter_files.txt
+              if [[ "${{ inputs.enable-flutter-check }}" == "true" ]]; then
+                HAS_FLUTTER=true
+                echo "$file" >> flutter_files.txt
+                echo "  DART: $file"
+              fi
+              ;;
+            *)
+              # File doesn't match any known language
               ;;
           esac
         done
         
+        echo ""
+        echo "=== Detection Summary ==="
         [ "$HAS_CPP" = true ] && echo "✓ C/C++: $(wc -l < cpp_files.txt 2>/dev/null || echo 0) files"
         [ "$HAS_JS" = true ] && echo "✓ JavaScript: $(wc -l < js_files.txt 2>/dev/null || echo 0) files"
         [ "$HAS_RUST" = true ] && echo "✓ Rust: $(wc -l < rust_files.txt 2>/dev/null || echo 0) files"
