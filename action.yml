@@ -242,7 +242,7 @@ runs:
     
     - name: Cache C/C++ tools
       if: steps.detect.outputs.has_cpp == 'true' && inputs.enable-cpp-check == 'true'
-      uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a
+      uses: actions/cache@v4
       with:
         path: ${{ env.CACHE_DIR }}/cppcheck
         key: cppcheck-${{ runner.os }}-v1
@@ -258,7 +258,7 @@ runs:
     
     - name: Cache Node.js
       if: steps.detect.outputs.has_js == 'true' && inputs.enable-js-check == 'true'
-      uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a
+      uses: actions/cache@v4
       with:
         path: ~/.npm
         key: node-${{ runner.os }}-${{ inputs.node-version }}-${{ hashFiles('**/package-lock.json') }}
@@ -266,13 +266,13 @@ runs:
     
     - name: Setup Node.js
       if: steps.detect.outputs.has_js == 'true' && inputs.enable-js-check == 'true'
-      uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b
+      uses: actions/setup-node@v4
       with:
         node-version: ${{ inputs.node-version }}
     
     - name: Cache Rust
       if: steps.detect.outputs.has_rust == 'true' && inputs.enable-rust-check == 'true'
-      uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a
+      uses: actions/cache@v4
       with:
         path: |
           ~/.cargo/bin/
@@ -290,14 +290,14 @@ runs:
     
     - name: Setup Java
       if: steps.detect.outputs.has_java == 'true' && inputs.enable-java-check == 'true'
-      uses: actions/setup-java@b36c23c0d998641eff861008f374ee103c25ac73
+      uses: actions/setup-java@v4
       with:
         distribution: ${{ inputs.java-distribution }}
         java-version: ${{ inputs.java-version }}
     
     - name: Cache Kotlin linter
       if: steps.detect.outputs.has_kotlin == 'true' && inputs.enable-kotlin-check == 'true'
-      uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a
+      uses: actions/cache@v4
       with:
         path: ${{ env.CACHE_DIR }}/ktlint
         key: ktlint-${{ runner.os }}-${{ inputs.ktlint-version }}
